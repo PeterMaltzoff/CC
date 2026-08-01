@@ -19,7 +19,7 @@ local GITHUB_USER   = "PeterMaltzoff"
 local GITHUB_REPO   = "CC"
 -- Pin to a commit so GitHub/proxy caches cannot serve an stale file.
 -- Bump this when you push fixes (git rev-parse --short HEAD on your PC).
-local GITHUB_REF    = "9d0f8ae"
+local GITHUB_REF    = "2f15d15"
 -- ===========================================================
 
 local FILES = {
