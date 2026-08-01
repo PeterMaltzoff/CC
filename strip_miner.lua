@@ -25,6 +25,8 @@
 --   main_step     main-tunnel blocks dug per iteration before branching
 --                 (optional, default 2 - or the saved value if omitted)
 
+local VERSION = "1.0.5"
+
 package.loaded["turtle_lib"] = nil
 local turtle_lib = require("turtle_lib")
 
@@ -39,6 +41,8 @@ if not iterations or not branch_length then
     print("Usage: strip_miner <iterations> <branch_length> [main_step]")
     return
 end
+
+print("strip_miner " .. VERSION)
 
 local bot = turtle_lib.new()
 local resumed, progress = bot.load_state(STATE_FILE)

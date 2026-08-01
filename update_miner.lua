@@ -17,7 +17,9 @@
 -- === CONFIG — edit these after creating your GitHub repo ===
 local GITHUB_USER   = "PeterMaltzoff"
 local GITHUB_REPO   = "CC"
-local GITHUB_BRANCH = "main"
+-- Pin to a commit so GitHub/proxy caches cannot serve an stale file.
+-- Bump this when you push fixes (git rev-parse --short HEAD on your PC).
+local GITHUB_REF    = "9d0f8ae"
 -- ===========================================================
 
 local FILES = {
@@ -26,8 +28,9 @@ local FILES = {
 }
 
 local function raw_url(path)
-    return ("https://raw.githubusercontent.com/%s/%s/%s/%s"):format(
-        GITHUB_USER, GITHUB_REPO, GITHUB_BRANCH, path
+    local cache_bust = tostring(os.epoch("utc"))
+    return ("https://raw.githubusercontent.com/%s/%s/%s/%s?%s"):format(
+        GITHUB_USER, GITHUB_REPO, GITHUB_REF, path, cache_bust
     )
 end
 
@@ -65,6 +68,13 @@ local function download_file(entry)
     -- GitHub returns an HTML error page for missing files; catch the obvious case.
     if body:sub(1, 15) == "<!DOCTYPE html>" or body:sub(1, 6) == "<html>" then
         print("FAILED: file not found on GitHub.")
+        return false
+    end
+
+    -- Reject accidentally cached/wrong downloads of strip_miner.
+    if entry.path == "strip_miner.lua" and not body:find('local VERSION = "1.0.5"', 1, true) then
+        print("FAILED: strip_miner.lua looks outdated (missing version marker).")
+        print("Try again, or download manually from GitHub.")
         return false
     end
 
