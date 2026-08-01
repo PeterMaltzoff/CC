@@ -25,7 +25,7 @@
 --   main_step     main-tunnel blocks dug per iteration before branching
 --                 (optional, default 2 - or the saved value if omitted)
 
-local VERSION = "1.0.13"
+local VERSION = "1.0.14"
 
 package.loaded["turtle_lib"] = nil
 local turtle_lib = require("turtle_lib")
@@ -196,12 +196,27 @@ local function clear_fluid_above(bot)
     end
 end
 
--- Place a wall torch in the cell above the turtle.
---
--- Turtles cannot place() a torch into their own cell ("Cannot place block here"),
--- so we must placeUp() from the floor. On east/west branches placeUp() prefers
--- to hang the torch on the block AHEAD — the next dig then destroys it.
--- Clear that forward support first, ensure a side wall exists, then placeUp().
+-- Prep while already standing in the torch cell (mid height): dig the block
+-- ahead so placeUp won't hang on it, and ensure the preferred side wall exists.
+-- Caller must already be at mid height facing along the branch.
+local function prepare_torch_mount(bot, prefer_side)
+    local home = bot.facing
+    local prefer_facing = prefer_side == "left" and ((home + 3) % 4) or ((home + 1) % 4)
+
+    if turtle.detect() then
+        turtle.dig()
+        bot.log("torch cleared forward support")
+    end
+
+    bot.turn_to(prefer_facing)
+    if not turtle.detect() then
+        local mounted = place_build(turtle.place, bot)
+        bot.log("torch mount wall placed=" .. tostring(mounted))
+    end
+    bot.turn_to(home)
+end
+
+-- placeUp() from the floor into the prepared cell above.
 local function try_place_torch_above(bot, prefer_side)
     local slot = bot.find_slot(TORCH_NAME)
     local count_before = bot.count_item(TORCH_NAME)
@@ -226,29 +241,6 @@ local function try_place_torch_above(bot, prefer_side)
 
     bot.log("torch try count=" .. count_before .. " prefer=" .. tostring(prefer_side)
         .. " facing=" .. bot.facing)
-
-    local home = bot.facing
-    local prefer_facing = prefer_side == "left" and ((home + 3) % 4) or ((home + 1) % 4)
-
-    if not bot.move_up() then
-        bot.log("torch skip: cannot move up count=" .. count_before)
-        return false
-    end
-
-    -- Remove the ahead block so placeUp won't hang the torch on the next dig.
-    if turtle.detect() then
-        turtle.dig()
-        bot.log("torch cleared forward support")
-    end
-
-    -- Need a north/south (side) wall to attach to.
-    bot.turn_to(prefer_facing)
-    if not turtle.detect() then
-        local mounted = place_build(turtle.place, bot)
-        bot.log("torch mount wall placed=" .. tostring(mounted))
-    end
-    bot.turn_to(home)
-    bot.move_down()
 
     turtle.select(slot)
     local placed, reason = turtle.placeUp()
@@ -405,9 +397,13 @@ local function mine_branch_step(bot, step, do_seal, place_torch, prefer_side)
         bot.turn_to(home)
     end
 
+    -- Torch prep while still at mid height (no second trip up).
+    if place_torch then
+        prepare_torch_mount(bot, prefer_side)
+    end
+
     bot.move_down()
 
-    -- After the 1x2 is cleared — torch sits in the open cell above and won't be dug.
     if place_torch then
         try_place_torch_above(bot, prefer_side)
     end
