@@ -199,11 +199,6 @@ local function is_liquid(ok, data)
     return ok and LIQUID_NAMES[data.name]
 end
 
-local function is_open(ok, data)
-    if not ok then return true end
-    return is_liquid(ok, data)
-end
-
 local function find_build_slot(bot)
     for _, name in ipairs(BUILD_NAMES) do
         local slot = bot.find_slot(name)
@@ -228,18 +223,18 @@ local function contain_fluid(inspect_fn, place_fn, bot)
     place_build(place_fn, bot)
 end
 
--- Shell cells: inspect once; if air or liquid, fill immediately (no second pass).
-local function fill_open_face(inspect_fn, place_fn, bot)
+-- Seal cross-sections: replace liquids only (not air — side columns are meant to stay open).
+local function fill_liquid_face(inspect_fn, place_fn, bot)
     local ok, data = inspect_fn()
-    if not is_open(ok, data) then return end
+    if not is_liquid(ok, data) then return end
     local placed = place_build(place_fn, bot)
-    bot.log("fill_open_face block=" .. tostring(ok and data.name or "air") .. " placed=" .. tostring(placed))
+    bot.log("fill_liquid block=" .. data.name .. " placed=" .. tostring(placed))
 end
 
 -- Seal one side wall (perpendicular to travel). Never forward/back along the tunnel.
 local function seal_side_face(bot, side)
     if side == "left" then bot.turn_left() else bot.turn_right() end
-    fill_open_face(turtle.inspect, turtle.place, bot)
+    fill_liquid_face(turtle.inspect, turtle.place, bot)
     if side == "left" then bot.turn_right() else bot.turn_left() end
 end
 
@@ -247,7 +242,7 @@ end
 local function seal_main_cross_section(bot)
     local home = bot.facing
 
-    fill_open_face(turtle.inspectDown, turtle.placeDown, bot)
+    fill_liquid_face(turtle.inspectDown, turtle.placeDown, bot)
 
     for row = 1, 3 do
         if row > 1 then bot.move_up() end
@@ -255,7 +250,7 @@ local function seal_main_cross_section(bot)
         seal_side_face(bot, "right")
     end
 
-    fill_open_face(turtle.inspectUp, turtle.placeUp, bot)
+    fill_liquid_face(turtle.inspectUp, turtle.placeUp, bot)
 
     bot.move_down()
     bot.move_down()
@@ -266,11 +261,11 @@ end
 local function seal_branch_cross_section(bot, branch_side)
     local home = bot.facing
 
-    fill_open_face(turtle.inspectDown, turtle.placeDown, bot)
+    fill_liquid_face(turtle.inspectDown, turtle.placeDown, bot)
     seal_side_face(bot, branch_side)
 
     bot.move_up()
-    fill_open_face(turtle.inspectUp, turtle.placeUp, bot)
+    fill_liquid_face(turtle.inspectUp, turtle.placeUp, bot)
     seal_side_face(bot, branch_side)
 
     bot.move_down()
@@ -358,14 +353,15 @@ local function resupply(bot)
 
     bot.turn_left()
     bot.push_items("front", { [FUEL_NAME] = true, [TORCH_NAME] = true })
-    bot.turn_right()
-
-    bot.refuel_to(FUEL_TARGET, FUEL_NAME, "top")
 
     local torch_need = TORCH_TARGET - bot.count_item(TORCH_NAME)
     if torch_need > 0 then
-        bot.take_item("top", TORCH_NAME, torch_need)
+        bot.take_item("front", TORCH_NAME, torch_need)
     end
+
+    bot.turn_right()
+
+    bot.refuel_to(FUEL_TARGET, FUEL_NAME, "top")
 end
 
 -- ---------- main loop ----------

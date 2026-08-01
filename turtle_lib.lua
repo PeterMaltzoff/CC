@@ -27,7 +27,7 @@ local MAX_DIG_ATTEMPTS = 10
 
 -- Set true to append every movement/dig/chest action to debug.txt on the turtle.
 -- Or pass { debug = true } to turtle_lib.new().
-local DEBUG = false
+local DEBUG = true
 local DEBUG_FILE = "debug.txt"
 
 local function debug_timestamp()
@@ -68,18 +68,61 @@ local function upload_debug_file()
         return false
     end
 
-    print("Uploading " .. DEBUG_FILE .. " to Pastebin...")
+    local handle = fs.open(DEBUG_FILE, "r")
+    local content = handle.readAll()
+    handle.close()
+
+    -- One-time setup: create pastebin_key.txt on this turtle with your dev API key.
+    local api_key = nil
+    if settings and settings.get then
+        api_key = settings.get("pastebin.apiKey")
+    end
+    if (not api_key or api_key == "") and fs.exists("pastebin_key.txt") then
+        local key_handle = fs.open("pastebin_key.txt", "r")
+        if key_handle then
+            api_key = key_handle.readAll():gsub("%s+", "")
+            key_handle.close()
+            if settings and settings.set then
+                settings.set("pastebin.apiKey", api_key)
+                print("Saved pastebin key to computer settings (no more typing it).")
+            end
+        end
+    end
+
+    if api_key and api_key ~= "" and http then
+        print("Uploading " .. DEBUG_FILE .. " to Pastebin...")
+        local response = http.post(
+            "https://pastebin.com/api/api_post.php",
+            {
+                api_dev_key = api_key,
+                api_option = "paste",
+                api_paste_code = content,
+                api_paste_name = "turtle debug",
+                api_paste_format = "text",
+                api_paste_private = "1",
+                api_paste_expire_date = "1D",
+            }
+        )
+        if response then
+            local url = response.readAll():gsub("%s+", "")
+            response.close()
+            if url:match("^https://pastebin%.com/") then
+                print("Debug log: " .. url)
+                return true
+            end
+            print("Pastebin error: " .. url)
+        end
+    end
+
+    print("Uploading via pastebin program...")
     if shell.run("pastebin", "put", DEBUG_FILE) then
-        print("Paste URL printed above — open it on your PC to copy the log.")
+        print("Paste URL printed above.")
         return true
     end
 
-    print("pastebin put failed. Printing log to screen instead:")
-    local handle = fs.open(DEBUG_FILE, "r")
-    if handle then
-        print(handle.readAll())
-        handle.close()
-    end
+    print("Upload failed. Create pastebin_key.txt on this turtle (one line = dev API key).")
+    print("Printing log to screen:")
+    print(content)
     return false
 end
 
