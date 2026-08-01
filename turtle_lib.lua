@@ -25,6 +25,78 @@ local DIRS = {
 
 local MAX_DIG_ATTEMPTS = 10
 
+-- Set true to append every movement/dig/chest action to debug.txt on the turtle.
+-- Or pass { debug = true } to turtle_lib.new().
+local DEBUG = false
+local DEBUG_FILE = "debug.txt"
+
+local function debug_timestamp()
+    return os.date("%Y-%m-%d %H:%M:%S")
+end
+
+local function debug_log(self, message)
+    if not self.debug then
+        return
+    end
+
+    local fuel = turtle.getFuelLevel()
+    local line = string.format(
+        "[%s] pos=%s facing=%d fuel=%s %s\n",
+        debug_timestamp(),
+        tostring(self.pos),
+        self.facing,
+        tostring(fuel),
+        message
+    )
+
+    local handle = fs.open(DEBUG_FILE, "a")
+    if handle then
+        handle.write(line)
+        handle.close()
+    end
+end
+
+local function clear_debug_file()
+    if fs.exists(DEBUG_FILE) then
+        fs.delete(DEBUG_FILE)
+    end
+end
+
+local function upload_debug_file()
+    if not fs.exists(DEBUG_FILE) then
+        print("No " .. DEBUG_FILE)
+        return false
+    end
+
+    print("Uploading " .. DEBUG_FILE .. " to Pastebin...")
+    if shell.run("pastebin", "put", DEBUG_FILE) then
+        print("Paste URL printed above — open it on your PC to copy the log.")
+        return true
+    end
+
+    print("pastebin put failed. Printing log to screen instead:")
+    local handle = fs.open(DEBUG_FILE, "r")
+    if handle then
+        print(handle.readAll())
+        handle.close()
+    end
+    return false
+end
+
+local function print_debug_file()
+    if not fs.exists(DEBUG_FILE) then
+        print("No " .. DEBUG_FILE)
+        return false
+    end
+
+    local handle = fs.open(DEBUG_FILE, "r")
+    if handle then
+        print(handle.readAll())
+        handle.close()
+    end
+    return true
+end
+
 -- Ctrl-T handler state (module-level; os.pullEvent is global).
 local terminate_callback = nil
 local terminate_installed = false
@@ -92,21 +164,30 @@ local function new(opts)
         fuel_chest_pos = opts.fuel_chest_pos or vector.new(0, 0, 0),
         home_pos = opts.home_pos or vector.new(0, 0, 0),
         item_targets = opts.item_targets or {}, -- { [item_name] = desired_count }
+        debug = opts.debug ~= nil and opts.debug or DEBUG,
     }
+
+    if self.debug then
+        clear_debug_file()
+        debug_log(self, "debug session start")
+    end
 
     -- ---------- rotation ----------
 
     function self.turn_left()
         turtle.turnLeft()
         self.facing = (self.facing - 1) % 4
+        debug_log(self, "turn_left -> facing=" .. self.facing)
     end
 
     function self.turn_right()
         turtle.turnRight()
         self.facing = (self.facing + 1) % 4
+        debug_log(self, "turn_right -> facing=" .. self.facing)
     end
 
     function self.turn_to(target_facing)
+        debug_log(self, "turn_to target=" .. target_facing .. " from=" .. self.facing)
         local diff = (target_facing - self.facing) % 4
         if diff == 1 then
             self.turn_right()
@@ -120,33 +201,41 @@ local function new(opts)
 
     -- ---------- low level movement (auto-dig through obstructions) ----------
 
-    local function try_clear_and(action, dig_fn, detect_fn)
-        for _ = 1, MAX_DIG_ATTEMPTS do
+    local function try_clear_and(action, dig_fn, detect_fn, action_name)
+        for attempt = 1, MAX_DIG_ATTEMPTS do
             if action() then
+                debug_log(self, action_name .. " OK attempt=" .. attempt)
                 return true
             end
             if detect_fn() then
+                debug_log(self, action_name .. " blocked dig attempt=" .. attempt)
                 dig_fn()
             else
+                debug_log(self, action_name .. " blocked attack attempt=" .. attempt)
                 turtle.attack() -- probably a mob blocking the way
             end
             sleep(0.4)
         end
+        debug_log(self, action_name .. " FAIL attempts=" .. MAX_DIG_ATTEMPTS)
         return false
     end
 
     function self.move_forward()
-        local ok = try_clear_and(turtle.forward, turtle.dig, turtle.detect)
+        debug_log(self, "move_forward START")
+        local ok = try_clear_and(turtle.forward, turtle.dig, turtle.detect, "move_forward")
         if ok then
             self.pos = self.pos + DIRS[self.facing]
         end
+        debug_log(self, "move_forward END ok=" .. tostring(ok) .. " pos=" .. tostring(self.pos))
         return ok
     end
 
     function self.move_back()
+        debug_log(self, "move_back START")
         -- turtle.back() can't dig, so if it's blocked: turn around, clear, walk, turn back
         if turtle.back() then
             self.pos = self.pos - DIRS[self.facing]
+            debug_log(self, "move_back OK direct pos=" .. tostring(self.pos))
             return true
         end
         self.turn_right()
@@ -154,22 +243,27 @@ local function new(opts)
         local ok = self.move_forward()
         self.turn_right()
         self.turn_right()
+        debug_log(self, "move_back END ok=" .. tostring(ok) .. " pos=" .. tostring(self.pos))
         return ok
     end
 
     function self.move_up()
-        local ok = try_clear_and(turtle.up, turtle.digUp, turtle.detectUp)
+        debug_log(self, "move_up START")
+        local ok = try_clear_and(turtle.up, turtle.digUp, turtle.detectUp, "move_up")
         if ok then
             self.pos = self.pos + vector.new(0, 1, 0)
         end
+        debug_log(self, "move_up END ok=" .. tostring(ok) .. " pos=" .. tostring(self.pos))
         return ok
     end
 
     function self.move_down()
-        local ok = try_clear_and(turtle.down, turtle.digDown, turtle.detectDown)
+        debug_log(self, "move_down START")
+        local ok = try_clear_and(turtle.down, turtle.digDown, turtle.detectDown, "move_down")
         if ok then
             self.pos = self.pos - vector.new(0, 1, 0)
         end
+        debug_log(self, "move_down END ok=" .. tostring(ok) .. " pos=" .. tostring(self.pos))
         return ok
     end
 
@@ -193,22 +287,29 @@ local function new(opts)
     -- Naive straight-line-per-axis mover: does Y, then X, then Z.
     -- Fine for open/known terrain; it will dig through anything in a direct line.
     function self.move_to(target)
+        debug_log(self, "move_to START target=" .. tostring(target) .. " from=" .. tostring(self.pos))
         move_vertical(target.y - self.pos.y)
         move_horizontal(target.x - self.pos.x, 1, 3)
         move_horizontal(target.z - self.pos.z, 2, 0)
+        debug_log(self, "move_to END pos=" .. tostring(self.pos))
     end
 
     -- ---------- fuel ----------
 
     -- Moves to fuel_chest_pos and sucks fuel from a chest directly ABOVE that position.
     function self.refuel()
+        debug_log(self, "refuel START")
         self.move_to(self.fuel_chest_pos)
-        turtle.suckUp()
+        local sucked = turtle.suckUp()
+        debug_log(self, "refuel suckUp=" .. tostring(sucked))
         for slot = 1, 16 do
             turtle.select(slot)
-            turtle.refuel()
+            if turtle.refuel() then
+                debug_log(self, "refuel burned slot=" .. slot)
+            end
         end
         turtle.select(1)
+        debug_log(self, "refuel END fuel=" .. tostring(turtle.getFuelLevel()))
     end
 
     function self.fuel_low(threshold)
@@ -279,8 +380,12 @@ local function new(opts)
     -- Pulls up to `amount` of item_name from the chest at `side` into the
     -- turtle's inventory. Returns how many were actually pulled.
     function self.take_item(side, item_name, amount)
+        debug_log(self, "take_item START side=" .. side .. " item=" .. item_name .. " amount=" .. amount)
         local chest = peripheral.wrap(side)
-        if not chest then return 0 end
+        if not chest then
+            debug_log(self, "take_item FAIL no chest on " .. side)
+            return 0
+        end
         local chest_name = peripheral.getName(chest)
         local suck = suck_fn_for(side)
         local pulled = 0
@@ -306,10 +411,12 @@ local function new(opts)
             if source_slot ~= 1 then
                 chest.pushItems(chest_name, source_slot, take, 1)
             end
-            suck(take)
+            local sucked = suck(take)
+            debug_log(self, "take_item suck take=" .. take .. " ok=" .. tostring(sucked))
             pulled = pulled + take
         end
 
+        debug_log(self, "take_item END pulled=" .. pulled)
         return pulled
     end
 
@@ -317,15 +424,18 @@ local function new(opts)
     -- except any item names present as keys in `exclude_names`.
     function self.push_items(side, exclude_names)
         exclude_names = exclude_names or {}
+        debug_log(self, "push_items START side=" .. side)
         local drop = drop_fn_for(side)
         for slot = 1, 16 do
             local detail = turtle.getItemDetail(slot)
             if detail and not exclude_names[detail.name] then
                 turtle.select(slot)
-                drop()
+                local dropped = drop()
+                debug_log(self, "push_items slot=" .. slot .. " item=" .. detail.name .. " ok=" .. tostring(dropped))
             end
         end
         turtle.select(1)
+        debug_log(self, "push_items END")
     end
 
     -- Pulls fuel_item_name from the chest at `side` and burns it, repeating
@@ -345,6 +455,7 @@ local function new(opts)
     -- directly instead - see spruce_corridor_farm.lua vs strip_miner.lua.
 
     function self.deposit_all_at_home()
+        debug_log(self, "deposit_all_at_home")
         self.move_to(self.home_pos)
         self.push_items("top")
     end
@@ -352,10 +463,12 @@ local function new(opts)
     -- Tops up every item in item_targets up to its target count, pulling
     -- from the chest above home_pos.
     function self.restock_at_home()
+        debug_log(self, "restock_at_home")
         self.move_to(self.home_pos)
         for item_name, target_count in pairs(self.item_targets) do
             local need = target_count - self.count_item(item_name)
             if need > 0 then
+                debug_log(self, "restock_at_home need=" .. need .. " of " .. item_name)
                 self.take_item("top", item_name, need)
             end
         end
@@ -380,6 +493,7 @@ local function new(opts)
             extra = extra or {},
         }))
         f.close()
+        debug_log(self, "save_state " .. filename)
         return true
     end
 
@@ -391,6 +505,7 @@ local function new(opts)
         f.close()
         self.pos = vector.new(data.pos.x, data.pos.y, data.pos.z)
         self.facing = data.facing
+        debug_log(self, "load_state " .. filename .. " pos=" .. tostring(self.pos) .. " facing=" .. self.facing)
         return true, data.extra or {}
     end
 
@@ -405,6 +520,7 @@ local function new(opts)
 
     function self.recover_to_home(facing)
         facing = facing or 0
+        debug_log(self, "recover_to_home facing=" .. facing)
         self.move_to(self.home_pos)
         self.turn_to(facing)
     end
@@ -412,6 +528,10 @@ local function new(opts)
     function self.on_terminate(callback)
         terminate_callback = callback
         install_terminate_handler()
+    end
+
+    function self.log(message)
+        debug_log(self, message)
     end
 
     return self
@@ -436,4 +556,8 @@ return {
     new = new,
     was_terminated = was_terminated,
     extra_without_terminated = extra_without_terminated,
+    upload_debug = upload_debug_file,
+    print_debug = print_debug_file,
+    DEBUG = DEBUG,
+    DEBUG_FILE = DEBUG_FILE,
 }

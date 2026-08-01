@@ -58,6 +58,8 @@ local function checkpoint(bot, opts)
     if opts.terminated then
         extra.terminated = true
     end
+    bot.log("checkpoint completed=" .. completed .. " torch_progress=" .. main_tunnel_distance
+        .. (opts.terminated and " TERMINATED" or ""))
     bot.save_state(STATE_FILE, extra)
 end
 
@@ -125,9 +127,13 @@ end
 
 -- TEMP: bail out and save state at home when torch placement keeps failing.
 local function abort_to_home(bot, message)
+    bot.log("ABORT " .. message)
     print("TEMP: " .. message)
     bot.recover_to_home(0)
     checkpoint(bot)
+    if bot.debug then
+        turtle_lib.upload_debug()
+    end
     error(message)
 end
 
@@ -179,10 +185,13 @@ local function try_place_torch_above(bot, prefer_side)
     local verified = placed and (torch_block_above() or count_after < count_before)
 
     if count_before > 0 and not verified then
+        bot.log("torch FAIL placed=" .. tostring(placed) .. " reason=" .. tostring(reason)
+            .. " count " .. count_before .. "->" .. count_after)
         abort_to_home(bot, "torch placement failed (placeUp returned "
             .. tostring(placed) .. ", reason=" .. tostring(reason) .. ")")
     end
 
+    bot.log("torch OK prefer_side=" .. tostring(prefer_side))
     return verified
 end
 
@@ -223,7 +232,8 @@ end
 local function fill_open_face(inspect_fn, place_fn, bot)
     local ok, data = inspect_fn()
     if not is_open(ok, data) then return end
-    place_build(place_fn, bot)
+    local placed = place_build(place_fn, bot)
+    bot.log("fill_open_face block=" .. tostring(ok and data.name or "air") .. " placed=" .. tostring(placed))
 end
 
 -- Seal one side wall (perpendicular to travel). Never forward/back along the tunnel.
@@ -296,6 +306,7 @@ local function clear_side_column(bot, side)
 end
 
 local function mine_main_step(bot, place_torch_here)
+    bot.log("mine_main_step torch=" .. tostring(place_torch_here) .. " distance=" .. main_tunnel_distance)
     contain_forward(bot)
     bot.move_forward()
     clear_vertical(bot)
@@ -309,6 +320,7 @@ end
 
 -- First branch step skips sealing — it sits against the open main tunnel.
 local function mine_branch_step(bot, branch_side, do_seal)
+    bot.log("mine_branch_step side=" .. branch_side .. " seal=" .. tostring(do_seal))
     contain_forward(bot)
     bot.move_forward()
     contain_up(bot)
@@ -321,6 +333,7 @@ local function mine_branch_step(bot, branch_side, do_seal)
 end
 
 local function mine_branch(bot, side, length)
+    bot.log("mine_branch START side=" .. side .. " length=" .. length)
     if side == "left" then bot.turn_left() else bot.turn_right() end
 
     for step = 1, length do
@@ -335,6 +348,7 @@ local function mine_branch(bot, side, length)
     end
 
     if side == "left" then bot.turn_right() else bot.turn_left() end
+    bot.log("mine_branch END side=" .. side)
 end
 
 -- ---------- home chest ----------
