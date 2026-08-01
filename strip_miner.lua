@@ -25,7 +25,7 @@
 --   main_step     main-tunnel blocks dug per iteration before branching
 --                 (optional, default 2 - or the saved value if omitted)
 
-local VERSION = "1.0.12"
+local VERSION = "1.0.13"
 
 package.loaded["turtle_lib"] = nil
 local turtle_lib = require("turtle_lib")
@@ -198,13 +198,10 @@ end
 
 -- Place a wall torch in the cell above the turtle.
 --
--- NEVER use turtle.placeUp() for torches on east/west branches. Minecraft
--- prefers west/east attach faces, so placeUp() sticks the torch to the block
--- AHEAD; the next dig mines that support and the torch vanishes — looks like
--- "never placed". In open caverns the front is air, so the torch finally
--- latches to a side wall (often cobble we just sealed) and survives.
---
--- Fix: move into the torch cell and place() only against LEFT/RIGHT walls.
+-- Turtles cannot place() a torch into their own cell ("Cannot place block here"),
+-- so we must placeUp() from the floor. On east/west branches placeUp() prefers
+-- to hang the torch on the block AHEAD — the next dig then destroys it.
+-- Clear that forward support first, ensure a side wall exists, then placeUp().
 local function try_place_torch_above(bot, prefer_side)
     local slot = bot.find_slot(TORCH_NAME)
     local count_before = bot.count_item(TORCH_NAME)
@@ -231,32 +228,30 @@ local function try_place_torch_above(bot, prefer_side)
         .. " facing=" .. bot.facing)
 
     local home = bot.facing
+    local prefer_facing = prefer_side == "left" and ((home + 3) % 4) or ((home + 1) % 4)
+
     if not bot.move_up() then
         bot.log("torch skip: cannot move up count=" .. count_before)
         return false
     end
 
-    -- Side walls only — never forward/back (those get dug on the next step).
-    local facings
-    if prefer_side == "left" then
-        facings = { (home + 3) % 4, (home + 1) % 4 }
-    else
-        facings = { (home + 1) % 4, (home + 3) % 4 }
+    -- Remove the ahead block so placeUp won't hang the torch on the next dig.
+    if turtle.detect() then
+        turtle.dig()
+        bot.log("torch cleared forward support")
     end
 
-    local placed, reason = false, nil
-    turtle.select(slot)
-    for _, f in ipairs(facings) do
-        bot.turn_to(f)
-        if turtle.detect() then
-            placed, reason = turtle.place()
-            if placed then break end
-        else
-            reason = "no wall"
-        end
+    -- Need a north/south (side) wall to attach to.
+    bot.turn_to(prefer_facing)
+    if not turtle.detect() then
+        local mounted = place_build(turtle.place, bot)
+        bot.log("torch mount wall placed=" .. tostring(mounted))
     end
     bot.turn_to(home)
     bot.move_down()
+
+    turtle.select(slot)
+    local placed, reason = turtle.placeUp()
     turtle.select(1)
 
     local count_after = bot.count_item(TORCH_NAME)
@@ -502,3 +497,8 @@ for i = 1, iterations do
 end
 
 print("Batch complete: " .. iterations .. " iterations this run, " .. completed .. " total.")
+
+if bot.debug then
+    print("Uploading debug log...")
+    turtle_lib.upload_debug()
+end

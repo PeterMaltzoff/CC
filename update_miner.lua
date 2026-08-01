@@ -21,8 +21,9 @@ local GITHUB_REF    = "main"
 -- ===========================================================
 
 local FILES = {
-    { path = "turtle_lib.lua",  label = "Turtle Lib" },
-    { path = "strip_miner.lua", label = "Strip Miner" },
+    { path = "turtle_lib.lua",   label = "Turtle Lib" },
+    { path = "strip_miner.lua",  label = "Strip Miner" },
+    { path = "upload_debug.lua", label = "Upload Debug" },
 }
 
 local function raw_url(path)
@@ -118,8 +119,7 @@ if ok_count == #FILES then
     print("All files ready. Example:")
     print("  strip_miner.lua 1 64")
     print("Debug upload: run `python receive_debug.py` on PC, then:")
-    print("  lua")
-    print('  require("turtle_lib").upload_debug()')
+    print("  upload_debug")
 else
     print(ok_count .. "/" .. #FILES .. " files updated.")
 end

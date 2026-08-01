@@ -182,8 +182,8 @@ local function upload_debug_file()
 
     print("Upload failed.")
     print("1) Start on PC: python receive_debug.py")
-    print("2) Allow 127.0.0.1:8787 in computercraft-server.toml (see receive_debug.py)")
-    print("Log is too long to dump here — fix local upload and retry.")
+    print("2) Allow 127.0.0.1:8787 in computercraft-server.toml")
+    print("3) Retry with: upload_debug")
     return false
 end
 
