@@ -91,17 +91,17 @@ local function upload_debug_file()
 
     if api_key and api_key ~= "" and http then
         print("Uploading " .. DEBUG_FILE .. " to Pastebin...")
+        local body = "api_dev_key=" .. textutils.urlEncode(api_key)
+            .. "&api_option=paste"
+            .. "&api_paste_code=" .. textutils.urlEncode(content)
+            .. "&api_paste_name=" .. textutils.urlEncode("turtle debug")
+            .. "&api_paste_format=text"
+            .. "&api_paste_private=1"
+            .. "&api_paste_expire_date=1D"
         local response = http.post(
             "https://pastebin.com/api/api_post.php",
-            {
-                api_dev_key = api_key,
-                api_option = "paste",
-                api_paste_code = content,
-                api_paste_name = "turtle debug",
-                api_paste_format = "text",
-                api_paste_private = "1",
-                api_paste_expire_date = "1D",
-            }
+            body,
+            { ["Content-Type"] = "application/x-www-form-urlencoded" }
         )
         if response then
             local url = response.readAll():gsub("%s+", "")

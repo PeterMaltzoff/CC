@@ -125,15 +125,21 @@ local function go_to_mining_face(bot)
     bot.turn_to(0)
 end
 
--- TEMP: bail out and save state at home when torch placement keeps failing.
+-- Bail out: head toward the main-tunnel center line, then path home.
+local function retreat_to_main_center(bot)
+    while bot.pos.x ~= bot.home_pos.x do
+        bot.turn_to(bot.pos.x < bot.home_pos.x and 1 or 3)
+        contain_forward(bot)
+        bot.move_forward()
+    end
+end
+
 local function abort_to_home(bot, message)
     bot.log("ABORT " .. message)
-    print("TEMP: " .. message)
+    print("Abort: " .. message)
+    retreat_to_main_center(bot)
     bot.recover_to_home(0)
     checkpoint(bot)
-    if bot.debug then
-        turtle_lib.upload_debug()
-    end
     error(message)
 end
 
@@ -154,12 +160,23 @@ local function try_place_up_with_hint(hint)
     return turtle.placeUp()
 end
 
+local function clear_fluid_above(bot)
+    local ok, data = turtle.inspectUp()
+    if is_liquid(ok, data) then
+        place_build(turtle.placeUp, bot)
+        turtle.digUp()
+        bot.log("cleared fluid above")
+    end
+end
+
 local function try_place_torch_above(bot, prefer_side)
     local slot = bot.find_slot(TORCH_NAME)
     if not slot then
-        print("No torches in inventory")
+        bot.log("torch skip: none in inventory")
         return false
     end
+
+    clear_fluid_above(bot)
 
     local count_before = bot.count_item(TORCH_NAME)
     turtle.select(slot)
@@ -184,15 +201,14 @@ local function try_place_torch_above(bot, prefer_side)
     local count_after = bot.count_item(TORCH_NAME)
     local verified = placed and (torch_block_above() or count_after < count_before)
 
-    if count_before > 0 and not verified then
-        bot.log("torch FAIL placed=" .. tostring(placed) .. " reason=" .. tostring(reason)
+    if not verified then
+        bot.log("torch skip placed=" .. tostring(placed) .. " reason=" .. tostring(reason)
             .. " count " .. count_before .. "->" .. count_after)
-        abort_to_home(bot, "torch placement failed (placeUp returned "
-            .. tostring(placed) .. ", reason=" .. tostring(reason) .. ")")
+        return false
     end
 
     bot.log("torch OK prefer_side=" .. tostring(prefer_side))
-    return verified
+    return true
 end
 
 local function is_liquid(ok, data)
@@ -223,12 +239,31 @@ local function contain_fluid(inspect_fn, place_fn, bot)
     place_build(place_fn, bot)
 end
 
--- Seal cross-sections: replace liquids only (not air — side columns are meant to stay open).
+-- Main tunnel sides: liquids only (air stays open for the 3-wide cross-section).
 local function fill_liquid_face(inspect_fn, place_fn, bot)
     local ok, data = inspect_fn()
     if not is_liquid(ok, data) then return end
     local placed = place_build(place_fn, bot)
     bot.log("fill_liquid block=" .. data.name .. " placed=" .. tostring(placed))
+end
+
+-- Branch outer walls: seal air and liquids (prevents water ingress).
+local function should_fill_branch_face(ok, data)
+    if not ok then return true end
+    return is_liquid(ok, data)
+end
+
+local function fill_branch_face(inspect_fn, place_fn, bot)
+    local ok, data = inspect_fn()
+    if not should_fill_branch_face(ok, data) then return end
+    local placed = place_build(place_fn, bot)
+    bot.log("fill_branch block=" .. tostring(ok and data.name or "air") .. " placed=" .. tostring(placed))
+end
+
+local function seal_outer_wall(bot, branch_side)
+    if branch_side == "left" then bot.turn_left() else bot.turn_right() end
+    fill_branch_face(turtle.inspect, turtle.place, bot)
+    if branch_side == "left" then bot.turn_right() else bot.turn_left() end
 end
 
 -- Seal one side wall (perpendicular to travel). Never forward/back along the tunnel.
@@ -257,18 +292,11 @@ local function seal_main_cross_section(bot)
     bot.turn_to(home)
 end
 
--- From the branch center facing along the branch: seal one outer side plus up/down.
-local function seal_branch_cross_section(bot, branch_side)
+-- Seal branch cross-section at current height: down, outer wall only.
+local function seal_branch_level(bot, branch_side)
     local home = bot.facing
-
-    fill_liquid_face(turtle.inspectDown, turtle.placeDown, bot)
-    seal_side_face(bot, branch_side)
-
-    bot.move_up()
-    fill_liquid_face(turtle.inspectUp, turtle.placeUp, bot)
-    seal_side_face(bot, branch_side)
-
-    bot.move_down()
+    fill_branch_face(turtle.inspectDown, turtle.placeDown, bot)
+    seal_outer_wall(bot, branch_side)
     bot.turn_to(home)
 end
 
@@ -313,23 +341,48 @@ local function mine_main_step(bot, place_torch_here)
     end
 end
 
--- First branch step skips sealing — it sits against the open main tunnel.
+-- Branch step: dig 1x2 ahead, seal outer walls (step 1 skips seal — open to main tunnel).
 local function mine_branch_step(bot, branch_side, do_seal)
     bot.log("mine_branch_step side=" .. branch_side .. " seal=" .. tostring(do_seal))
+
     contain_forward(bot)
     bot.move_forward()
+
+    if do_seal then
+        seal_branch_level(bot, branch_side)
+    end
+
     contain_up(bot)
     bot.move_up()
-    contain_down(bot)
-    bot.move_down()
+
     if do_seal then
-        seal_branch_cross_section(bot, branch_side)
+        local home = bot.facing
+        fill_branch_face(turtle.inspectUp, turtle.placeUp, bot)
+        seal_outer_wall(bot, branch_side)
+        bot.turn_to(home)
+    end
+
+    bot.move_down()
+end
+
+local function retreat_branch(bot, steps)
+    for _ = 1, steps do
+        contain_forward(bot)
+        if not bot.move_back() then
+            bot.turn_right()
+            bot.turn_right()
+            contain_forward(bot)
+            bot.move_forward()
+            bot.turn_right()
+            bot.turn_right()
+        end
     end
 end
 
 local function mine_branch(bot, side, length)
     bot.log("mine_branch START side=" .. side .. " length=" .. length)
     if side == "left" then bot.turn_left() else bot.turn_right() end
+    local branch_facing = bot.facing
 
     for step = 1, length do
         mine_branch_step(bot, side, step > 1)
@@ -337,12 +390,11 @@ local function mine_branch(bot, side, length)
             try_place_torch_above(bot)
         end
     end
-    for _ = 1, length do
-        contain_forward(bot)
-        bot.move_forward()
-    end
 
-    if side == "left" then bot.turn_right() else bot.turn_left() end
+    bot.turn_to((branch_facing + 2) % 4)
+    retreat_branch(bot, length)
+    bot.turn_to(0)
+
     bot.log("mine_branch END side=" .. side)
 end
 
