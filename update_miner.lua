@@ -3,8 +3,8 @@
 --
 -- SETUP (once):
 --   1. Create a public GitHub repo and push this project to it.
---   2. Set GITHUB_USER / GITHUB_REPO / GITHUB_BRANCH below.
---   3. Copy this file to the turtle (only needed once, or when this script changes).
+--   2. Set GITHUB_USER / GITHUB_REPO below.
+--   3. Copy this file to the turtle once (re-copy only if this script itself changes).
 --
 -- PC workflow after edits:
 --   git add -A && git commit -m "update miner" && git push
@@ -17,9 +17,7 @@
 -- === CONFIG — edit these after creating your GitHub repo ===
 local GITHUB_USER   = "PeterMaltzoff"
 local GITHUB_REPO   = "CC"
--- Pin to a commit so GitHub/proxy caches cannot serve an stale file.
--- Bump this when you push fixes (git rev-parse --short HEAD on your PC).
-local GITHUB_REF    = "2f15d15"
+local GITHUB_REF    = "main"
 -- ===========================================================
 
 local FILES = {
@@ -71,10 +69,9 @@ local function download_file(entry)
         return false
     end
 
-    -- Reject accidentally cached/wrong downloads of strip_miner.
-    if entry.path == "strip_miner.lua" and not body:find('local VERSION = "1.0.5"', 1, true) then
-        print("FAILED: strip_miner.lua looks outdated (missing version marker).")
-        print("Try again, or download manually from GitHub.")
+    -- Sanity-check strip_miner (reject empty/HTML/cached garbage).
+    if entry.path == "strip_miner.lua" and not body:find("local VERSION = ", 1, true) then
+        print("FAILED: strip_miner.lua missing VERSION marker — download may be corrupt.")
         return false
     end
 

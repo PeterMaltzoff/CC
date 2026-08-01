@@ -4,7 +4,7 @@
 
 local GITHUB_USER = "PeterMaltzoff"
 local GITHUB_REPO = "CC"
-local GITHUB_REF  = "2f15d15"
+local GITHUB_REF  = "main"
 
 local FILES = { "turtle_lib.lua", "strip_miner.lua" }
 
