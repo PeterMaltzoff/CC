@@ -25,7 +25,7 @@
 --   main_step     main-tunnel blocks dug per iteration before branching
 --                 (optional, default 2 - or the saved value if omitted)
 
-local VERSION = "1.0.6"
+local VERSION = "1.0.7"
 
 package.loaded["turtle_lib"] = nil
 local turtle_lib = require("turtle_lib")
@@ -370,8 +370,8 @@ local function mine_branch(bot, side, length)
 
     for step = 1, length do
         mine_branch_step(bot, step > 1)
-        -- First torch at step 15, not step 1 (step 1 is still at the main-tunnel junction).
-        if step > 1 and step % TORCH_SPACING == 0 then
+        -- Entrance torch on step 1, then every TORCH_SPACING along the branch.
+        if step == 1 or step % TORCH_SPACING == 0 then
             try_place_torch_above(bot)
         end
     end
