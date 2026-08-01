@@ -125,7 +125,37 @@ local function go_to_mining_face(bot)
     bot.turn_to(0)
 end
 
--- Bail out: head toward the main-tunnel center line, then path home.
+local function is_liquid(ok, data)
+    return ok and LIQUID_NAMES[data.name]
+end
+
+local function find_build_slot(bot)
+    for _, name in ipairs(BUILD_NAMES) do
+        local slot = bot.find_slot(name)
+        if slot then return slot end
+    end
+    return nil
+end
+
+local function place_build(place_fn, bot)
+    local build = find_build_slot(bot)
+    if not build then return false end
+    turtle.select(build)
+    local ok = place_fn()
+    turtle.select(1)
+    return ok
+end
+
+local function contain_fluid(inspect_fn, place_fn, bot)
+    local ok, data = inspect_fn()
+    if not is_liquid(ok, data) then return end
+    place_build(place_fn, bot)
+end
+
+local function contain_forward(bot) contain_fluid(turtle.inspect, turtle.place, bot) end
+local function contain_up(bot) contain_fluid(turtle.inspectUp, turtle.placeUp, bot) end
+local function contain_down(bot) contain_fluid(turtle.inspectDown, turtle.placeDown, bot) end
+
 local function retreat_to_main_center(bot)
     while bot.pos.x ~= bot.home_pos.x do
         bot.turn_to(bot.pos.x < bot.home_pos.x and 1 or 3)
@@ -211,34 +241,6 @@ local function try_place_torch_above(bot, prefer_side)
     return true
 end
 
-local function is_liquid(ok, data)
-    return ok and LIQUID_NAMES[data.name]
-end
-
-local function find_build_slot(bot)
-    for _, name in ipairs(BUILD_NAMES) do
-        local slot = bot.find_slot(name)
-        if slot then return slot end
-    end
-    return nil
-end
-
-local function place_build(place_fn, bot)
-    local build = find_build_slot(bot)
-    if not build then return false end
-    turtle.select(build)
-    local ok = place_fn()
-    turtle.select(1)
-    return ok
-end
-
--- Path cells: liquid in the dig line gets replaced; the next move digs it clear.
-local function contain_fluid(inspect_fn, place_fn, bot)
-    local ok, data = inspect_fn()
-    if not is_liquid(ok, data) then return end
-    place_build(place_fn, bot)
-end
-
 -- Main tunnel sides: liquids only (air stays open for the 3-wide cross-section).
 local function fill_liquid_face(inspect_fn, place_fn, bot)
     local ok, data = inspect_fn()
@@ -299,10 +301,6 @@ local function seal_branch_level(bot, branch_side)
     seal_outer_wall(bot, branch_side)
     bot.turn_to(home)
 end
-
-local function contain_forward(bot) contain_fluid(turtle.inspect, turtle.place, bot) end
-local function contain_up(bot) contain_fluid(turtle.inspectUp, turtle.placeUp, bot) end
-local function contain_down(bot) contain_fluid(turtle.inspectDown, turtle.placeDown, bot) end
 
 -- ---------- tunnel shape helpers ----------
 
