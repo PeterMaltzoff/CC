@@ -25,7 +25,7 @@
 --   main_step     main-tunnel blocks dug per iteration before branching
 --                 (optional, default 2 - or the saved value if omitted)
 
-local VERSION = "1.0.11"
+local VERSION = "1.0.12"
 
 package.loaded["turtle_lib"] = nil
 local turtle_lib = require("turtle_lib")
@@ -197,8 +197,14 @@ local function clear_fluid_above(bot)
 end
 
 -- Place a wall torch in the cell above the turtle.
--- NOTE: turtle.placeUp(text) text is for SIGNS only — "left"/"right" are NOT
--- wall hints. We stand in the torch cell and place() against a solid wall.
+--
+-- NEVER use turtle.placeUp() for torches on east/west branches. Minecraft
+-- prefers west/east attach faces, so placeUp() sticks the torch to the block
+-- AHEAD; the next dig mines that support and the torch vanishes — looks like
+-- "never placed". In open caverns the front is air, so the torch finally
+-- latches to a side wall (often cobble we just sealed) and survives.
+--
+-- Fix: move into the torch cell and place() only against LEFT/RIGHT walls.
 local function try_place_torch_above(bot, prefer_side)
     local slot = bot.find_slot(TORCH_NAME)
     local count_before = bot.count_item(TORCH_NAME)
@@ -214,7 +220,6 @@ local function try_place_torch_above(bot, prefer_side)
 
     clear_fluid_above(bot)
 
-    -- Need air (or an existing torch) in the cell above.
     local up_ok, up_data = turtle.inspectUp()
     if up_ok and not TORCH_BLOCK_NAMES[up_data.name] then
         bot.log("torch skip: blocked above by " .. tostring(up_data.name)
@@ -226,41 +231,32 @@ local function try_place_torch_above(bot, prefer_side)
         .. " facing=" .. bot.facing)
 
     local home = bot.facing
-    local placed, reason = false, nil
-
-    -- Prefer placeUp first (torch in cell above, game picks an attach face).
-    turtle.select(slot)
-    placed, reason = turtle.placeUp()
-
-    -- Fallback: stand in the torch cell and place against a detected wall.
-    if not placed then
-        if not bot.move_up() then
-            turtle.select(1)
-            bot.log("torch skip: cannot move up reason=" .. tostring(reason)
-                .. " count=" .. count_before)
-            return false
-        end
-
-        local facings
-        if prefer_side == "left" then
-            facings = { (home + 3) % 4, (home + 1) % 4, home, (home + 2) % 4 }
-        else
-            -- prefer right, or unspecified
-            facings = { (home + 1) % 4, (home + 3) % 4, home, (home + 2) % 4 }
-        end
-
-        turtle.select(slot)
-        for _, f in ipairs(facings) do
-            bot.turn_to(f)
-            if turtle.detect() then
-                placed, reason = turtle.place()
-                if placed then break end
-            end
-        end
-        bot.turn_to(home)
-        bot.move_down()
+    if not bot.move_up() then
+        bot.log("torch skip: cannot move up count=" .. count_before)
+        return false
     end
 
+    -- Side walls only — never forward/back (those get dug on the next step).
+    local facings
+    if prefer_side == "left" then
+        facings = { (home + 3) % 4, (home + 1) % 4 }
+    else
+        facings = { (home + 1) % 4, (home + 3) % 4 }
+    end
+
+    local placed, reason = false, nil
+    turtle.select(slot)
+    for _, f in ipairs(facings) do
+        bot.turn_to(f)
+        if turtle.detect() then
+            placed, reason = turtle.place()
+            if placed then break end
+        else
+            reason = "no wall"
+        end
+    end
+    bot.turn_to(home)
+    bot.move_down()
     turtle.select(1)
 
     local count_after = bot.count_item(TORCH_NAME)
