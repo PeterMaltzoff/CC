@@ -25,7 +25,7 @@
 --   main_step     main-tunnel blocks dug per iteration before branching
 --                 (optional, default 2 - or the saved value if omitted)
 
-local VERSION = "1.0.10"
+local VERSION = "1.0.11"
 
 package.loaded["turtle_lib"] = nil
 local turtle_lib = require("turtle_lib")
@@ -187,18 +187,6 @@ local function torch_block_above()
     return ok and TORCH_BLOCK_NAMES[data.name]
 end
 
-local function try_place_up_with_hint(hint)
-    if hint then
-        local ok, placed, reason = pcall(function()
-            return turtle.placeUp(hint)
-        end)
-        if ok then
-            return placed, reason
-        end
-    end
-    return turtle.placeUp()
-end
-
 local function clear_fluid_above(bot)
     local ok, data = turtle.inspectUp()
     if is_liquid(ok, data) then
@@ -208,46 +196,83 @@ local function clear_fluid_above(bot)
     end
 end
 
+-- Place a wall torch in the cell above the turtle.
+-- NOTE: turtle.placeUp(text) text is for SIGNS only — "left"/"right" are NOT
+-- wall hints. We stand in the torch cell and place() against a solid wall.
 local function try_place_torch_above(bot, prefer_side)
     local slot = bot.find_slot(TORCH_NAME)
+    local count_before = bot.count_item(TORCH_NAME)
     if not slot then
-        bot.log("torch skip: none in inventory")
+        bot.log("torch skip: none in inventory count=" .. count_before)
         return false
+    end
+
+    if torch_block_above() then
+        bot.log("torch OK already present")
+        return true
     end
 
     clear_fluid_above(bot)
 
-    local count_before = bot.count_item(TORCH_NAME)
-    turtle.select(slot)
-
-    local hints
-    if prefer_side == "left" then
-        hints = { "left", "right", nil }
-    elseif prefer_side == "right" then
-        hints = { "right", "left", nil }
-    else
-        hints = { "left", "right", nil }
+    -- Need air (or an existing torch) in the cell above.
+    local up_ok, up_data = turtle.inspectUp()
+    if up_ok and not TORCH_BLOCK_NAMES[up_data.name] then
+        bot.log("torch skip: blocked above by " .. tostring(up_data.name)
+            .. " count=" .. count_before)
+        return false
     end
 
-    local placed, reason
-    for _, hint in ipairs(hints) do
-        placed, reason = try_place_up_with_hint(hint)
-        if placed then break end
+    bot.log("torch try count=" .. count_before .. " prefer=" .. tostring(prefer_side)
+        .. " facing=" .. bot.facing)
+
+    local home = bot.facing
+    local placed, reason = false, nil
+
+    -- Prefer placeUp first (torch in cell above, game picks an attach face).
+    turtle.select(slot)
+    placed, reason = turtle.placeUp()
+
+    -- Fallback: stand in the torch cell and place against a detected wall.
+    if not placed then
+        if not bot.move_up() then
+            turtle.select(1)
+            bot.log("torch skip: cannot move up reason=" .. tostring(reason)
+                .. " count=" .. count_before)
+            return false
+        end
+
+        local facings
+        if prefer_side == "left" then
+            facings = { (home + 3) % 4, (home + 1) % 4, home, (home + 2) % 4 }
+        else
+            -- prefer right, or unspecified
+            facings = { (home + 1) % 4, (home + 3) % 4, home, (home + 2) % 4 }
+        end
+
+        turtle.select(slot)
+        for _, f in ipairs(facings) do
+            bot.turn_to(f)
+            if turtle.detect() then
+                placed, reason = turtle.place()
+                if placed then break end
+            end
+        end
+        bot.turn_to(home)
+        bot.move_down()
     end
 
     turtle.select(1)
 
     local count_after = bot.count_item(TORCH_NAME)
-    local verified = placed and (torch_block_above() or count_after < count_before)
-
-    if not verified then
-        bot.log("torch skip placed=" .. tostring(placed) .. " reason=" .. tostring(reason)
+    if torch_block_above() or (placed and count_after < count_before) then
+        bot.log("torch OK prefer_side=" .. tostring(prefer_side)
             .. " count " .. count_before .. "->" .. count_after)
-        return false
+        return true
     end
 
-    bot.log("torch OK prefer_side=" .. tostring(prefer_side))
-    return true
+    bot.log("torch skip placed=" .. tostring(placed) .. " reason=" .. tostring(reason)
+        .. " count " .. count_before .. "->" .. count_after)
+    return false
 end
 
 -- Fill air or liquid (used by both sealers; each sealer picks WHICH faces).
@@ -411,8 +436,10 @@ local function retreat_branch(bot, steps)
 end
 
 local function mine_branch(bot, side, length)
-    bot.log("mine_branch START side=" .. side .. " length=" .. length)
+    bot.log("mine_branch START side=" .. side .. " length=" .. length
+        .. " torches=" .. bot.count_item(TORCH_NAME))
     if side == "left" then bot.turn_left() else bot.turn_right() end
+    -- Both branches prefer the north wall (consistent lighting along the strip).
     local prefer_side = side == "left" and "right" or "left"
 
     for step = 1, length do
