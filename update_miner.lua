@@ -21,6 +21,7 @@ local GITHUB_REF    = "main"
 -- ===========================================================
 
 local FILES = {
+    { path = "update_miner.lua", label = "Updater (self)" },
     { path = "turtle_lib.lua",   label = "Turtle Lib" },
     { path = "strip_miner.lua",  label = "Strip Miner" },
     { path = "upload_debug.lua", label = "Upload Debug" },
