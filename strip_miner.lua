@@ -25,7 +25,7 @@
 --   main_step     main-tunnel blocks dug per iteration before branching
 --                 (optional, default 2 - or the saved value if omitted)
 
-local VERSION = "1.0.8"
+local VERSION = "1.0.9"
 
 package.loaded["turtle_lib"] = nil
 local turtle_lib = require("turtle_lib")
@@ -50,6 +50,11 @@ local resumed, progress = bot.load_state(STATE_FILE)
 local main_step = tonumber(args[3]) or (resumed and progress.main_step) or 2
 local completed = (resumed and progress.completed) or 0
 local main_tunnel_distance = (resumed and progress.torch_progress) or 0
+
+bot.log("strip_miner " .. VERSION .. " iterations=" .. iterations
+    .. " branch_length=" .. branch_length .. " main_step=" .. main_step
+    .. " resumed=" .. tostring(resumed) .. " completed=" .. completed
+    .. " torch_progress=" .. main_tunnel_distance)
 
 local function checkpoint(bot, opts)
     opts = opts or {}
@@ -245,18 +250,23 @@ local function try_place_torch_above(bot, prefer_side)
     return true
 end
 
--- Main tunnel sides: liquids only (air stays open for the 3-wide cross-section).
-local function fill_liquid_face(inspect_fn, place_fn, bot)
-    local ok, data = inspect_fn()
-    if not is_liquid(ok, data) then return end
-    local placed = place_build(place_fn, bot)
-    bot.log("fill_liquid block=" .. data.name .. " placed=" .. tostring(placed))
-end
-
--- Branch outer walls: seal air and liquids (prevents water ingress).
+-- Seal air and liquid holes (main tunnel walls/floor/ceiling and branch outer walls).
 local function should_fill_branch_face(ok, data)
     if not ok then return true end
     return is_liquid(ok, data)
+end
+
+local function fill_main_face(inspect_fn, place_fn, bot)
+    local ok, data = inspect_fn()
+    if not should_fill_branch_face(ok, data) then return end
+    local placed = place_build(place_fn, bot)
+    bot.log("fill_main block=" .. tostring(ok and data.name or "air") .. " placed=" .. tostring(placed))
+end
+
+local function seal_outer_wall(bot, side)
+    if side == "left" then bot.turn_left() else bot.turn_right() end
+    fill_main_face(turtle.inspect, turtle.place, bot)
+    if side == "left" then bot.turn_right() else bot.turn_left() end
 end
 
 local function fill_branch_face(inspect_fn, place_fn, bot)
@@ -281,27 +291,31 @@ end
 
 -- ---------- tunnel shape helpers ----------
 
--- Clears the 2 blocks above the turtle; seals liquids on floor/ceiling while digging.
-local function clear_vertical(bot)
-    fill_liquid_face(turtle.inspectDown, turtle.placeDown, bot)
+-- Clears the 2 blocks above the turtle; seals floor/ceiling holes (air + liquid).
+-- outer_side: "left"/"right" seals the outside wall at each height; nil = center lane.
+local function clear_vertical(bot, outer_side)
+    fill_main_face(turtle.inspectDown, turtle.placeDown, bot)
+    if outer_side then seal_outer_wall(bot, outer_side) end
     contain_up(bot)
     bot.move_up()
-    fill_liquid_face(turtle.inspectUp, turtle.placeUp, bot)
+    fill_main_face(turtle.inspectUp, turtle.placeUp, bot)
+    if outer_side then seal_outer_wall(bot, outer_side) end
     contain_up(bot)
     bot.move_up()
-    fill_liquid_face(turtle.inspectUp, turtle.placeUp, bot)
+    fill_main_face(turtle.inspectUp, turtle.placeUp, bot)
+    if outer_side then seal_outer_wall(bot, outer_side) end
     contain_down(bot)
     bot.move_down()
     contain_down(bot)
     bot.move_down()
 end
 
--- Dig a side column; seal liquids while there (no separate center-lane pass).
+-- Dig a side column; seal outer wall + floor/ceiling holes while there.
 local function clear_side_column(bot, side)
     if side == "left" then bot.turn_left() else bot.turn_right() end
     contain_forward(bot)
     bot.move_forward()
-    clear_vertical(bot)
+    clear_vertical(bot, side)
     bot.move_back()
     if side == "left" then bot.turn_right() else bot.turn_left() end
 end
@@ -319,11 +333,17 @@ local function mine_main_step(bot, place_torch_here)
 end
 
 -- Branch step: dig 1x2, seal sides at each level (step 1 skips seal — open to main tunnel).
-local function mine_branch_step(bot, do_seal)
-    bot.log("mine_branch_step seal=" .. tostring(do_seal))
+local function mine_branch_step(bot, step, do_seal, place_torch, prefer_side)
+    bot.log("mine_branch_step step=" .. step .. " seal=" .. tostring(do_seal)
+        .. " torch=" .. tostring(place_torch))
 
     contain_forward(bot)
     bot.move_forward()
+
+    -- Torch right after entering the block (before sealing walls/ceiling).
+    if place_torch then
+        try_place_torch_above(bot, prefer_side)
+    end
 
     if do_seal then
         seal_branch_sides(bot)
@@ -367,14 +387,13 @@ end
 local function mine_branch(bot, side, length)
     bot.log("mine_branch START side=" .. side .. " length=" .. length)
     if side == "left" then bot.turn_left() else bot.turn_right() end
+    local prefer_side = side == "left" and "right" or "left"
 
     for step = 1, length do
-        mine_branch_step(bot, step > 1)
         -- Step 1 is the main tunnel's side column (already dug). Step 2 is the
         -- first real branch block — place the entrance torch there, then every 15.
-        if step >= 2 and (step - 2) % TORCH_SPACING == 0 then
-            try_place_torch_above(bot)
-        end
+        local place_torch = step >= 2 and (step - 2) % TORCH_SPACING == 0
+        mine_branch_step(bot, step, step > 1, place_torch, prefer_side)
     end
 
     -- Still facing along the branch — walk back to the main tunnel.
@@ -395,6 +414,10 @@ local function resupply(bot)
     local torch_need = TORCH_TARGET - bot.count_item(TORCH_NAME)
     if torch_need > 0 then
         bot.take_item("front", TORCH_NAME, torch_need)
+    end
+    torch_need = TORCH_TARGET - bot.count_item(TORCH_NAME)
+    if torch_need > 0 then
+        bot.take_item("top", TORCH_NAME, torch_need)
     end
 
     bot.turn_right()

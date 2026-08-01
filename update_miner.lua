@@ -83,6 +83,12 @@ local function download_file(entry)
 
     handle.write(body)
     handle.close()
+    if entry.path == "strip_miner.lua" then
+        local ver = body:match('local VERSION = "([^"]+)"')
+        if ver then
+            print("  Version: " .. ver)
+        end
+    end
     print("OK: " .. entry.path)
     return true
 end
