@@ -544,10 +544,17 @@ local function new(opts)
 
     -- Pulls fuel_item_name from the chest at `side` and burns it, repeating
     -- until getFuelLevel() reaches target_level or the chest runs dry.
+    -- fuel_item_name: one item id string, or a list of ids tried in order
+    -- (e.g. { "minecraft:coal", "minecraft:charcoal" }).
     function self.refuel_to(target_level, fuel_item_name, side)
         side = side or "top"
+        local names = type(fuel_item_name) == "table" and fuel_item_name or { fuel_item_name }
         while turtle.getFuelLevel() ~= "unlimited" and turtle.getFuelLevel() < target_level do
-            local pulled = self.take_item(side, fuel_item_name, 8)
+            local pulled = 0
+            for _, name in ipairs(names) do
+                pulled = self.take_item(side, name, 8)
+                if pulled > 0 then break end
+            end
             if pulled == 0 then break end
             self.refuel_from_inventory()
         end

@@ -1,9 +1,9 @@
 -- strip_miner.lua
 -- Mines a 3x3 main tunnel with 1x2 branch tunnels off both sides.
 --
--- SETUP: turtle starts under the home chest (fuel/coal ONLY) facing the
--- direction the main tunnel should go. A 2x1 chest sits to its LEFT for
--- everything that isn't fuel.
+-- SETUP: turtle starts under the home chest (fuel: coal and/or charcoal)
+-- facing the direction the main tunnel should go. A 2x1 chest sits to its
+-- LEFT for everything that isn't fuel.
 --
 -- Each iteration = one main-tunnel segment + its left AND right branches,
 -- done together and checkpointed as a single unit - so it's always safe to
@@ -25,7 +25,7 @@
 --   main_step     main-tunnel blocks dug per iteration before branching
 --                 (optional, default 2 - or the saved value if omitted)
 
-local VERSION = "1.0.15"
+local VERSION = "1.0.16"
 
 package.loaded["turtle_lib"] = nil
 local turtle_lib = require("turtle_lib")
@@ -102,7 +102,10 @@ if resumed then
     print(completed .. " iterations completed so far. Running " .. iterations .. " more.")
 end
 
-local FUEL_NAME = "minecraft:coal" -- change to whatever you're stocking
+local FUEL_NAMES = {
+    "minecraft:coal",
+    "minecraft:charcoal",
+}
 local FUEL_TARGET = 1000
 
 local TORCH_NAME = "minecraft:torch"
@@ -454,7 +457,10 @@ end
 -- Dump junk to the chest we're facing. Keep fuel, torches, and up to
 -- BUILD_KEEP plugging blocks (cobble / cobbled deepslate).
 local function dump_inventory(bot)
-    local keep = { [FUEL_NAME] = true, [TORCH_NAME] = true }
+    local keep = { [TORCH_NAME] = true }
+    for _, name in ipairs(FUEL_NAMES) do
+        keep[name] = true
+    end
     for _, name in ipairs(BUILD_NAMES) do
         keep[name] = true
     end
@@ -495,7 +501,7 @@ local function resupply(bot)
 
     bot.turn_right()
 
-    bot.refuel_to(FUEL_TARGET, FUEL_NAME, "top")
+    bot.refuel_to(FUEL_TARGET, FUEL_NAMES, "top")
 end
 
 -- ---------- main loop ----------
