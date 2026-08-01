@@ -62,6 +62,61 @@ local function clear_debug_file()
     end
 end
 
+local function debug_server_url()
+    if settings and settings.get then
+        local from_settings = settings.get("miner.debugServer")
+        if from_settings and from_settings ~= "" then
+            return from_settings
+        end
+    end
+    if fs.exists("debug_server.txt") then
+        local h = fs.open("debug_server.txt", "r")
+        if h then
+            local url = h.readAll():gsub("%s+", "")
+            h.close()
+            if url ~= "" then
+                return url
+            end
+        end
+    end
+    -- Default: local receiver from receive_debug.py on the same machine.
+    return "http://127.0.0.1:8787/debug"
+end
+
+local function upload_debug_to_local(content)
+    local url = debug_server_url()
+    print("Uploading " .. DEBUG_FILE .. " to local server...")
+    print("  " .. url)
+
+    if not http then
+        print("FAILED: http API unavailable")
+        return false
+    end
+    if http.checkURL and not http.checkURL(url) then
+        print("FAILED: URL blocked by CC http rules.")
+        print("Allow 127.0.0.1:8787 in world/serverconfig/computercraft-server.toml")
+        print("Add ABOVE the $private deny rule, then restart Minecraft:")
+        print('  [[http.rules]]')
+        print('      host = "127.0.0.1"')
+        print('      port = 8787')
+        print('      action = "allow"')
+        return false
+    end
+
+    local response = http.post(url, content, {
+        ["Content-Type"] = "text/plain; charset=utf-8",
+    })
+    if not response then
+        print("FAILED: no response. Is `python receive_debug.py` running on your PC?")
+        return false
+    end
+
+    local body = response.readAll()
+    response.close()
+    print("OK: " .. tostring(body):gsub("%s+$", ""))
+    return true
+end
+
 local function upload_debug_file()
     if not fs.exists(DEBUG_FILE) then
         print("No " .. DEBUG_FILE)
@@ -72,7 +127,12 @@ local function upload_debug_file()
     local content = handle.readAll()
     handle.close()
 
-    -- One-time setup: create pastebin_key.txt on this turtle with your dev API key.
+    -- Prefer local PC receiver (receive_debug.py). Pastebin is flaky from CC/Java TLS.
+    if upload_debug_to_local(content) then
+        return true
+    end
+
+    -- Optional Pastebin fallback.
     local api_key = nil
     if settings and settings.get then
         api_key = settings.get("pastebin.apiKey")
@@ -120,9 +180,10 @@ local function upload_debug_file()
         return true
     end
 
-    print("Upload failed. Create pastebin_key.txt on this turtle (one line = dev API key).")
-    print("Printing log to screen:")
-    print(content)
+    print("Upload failed.")
+    print("1) Start on PC: python receive_debug.py")
+    print("2) Allow 127.0.0.1:8787 in computercraft-server.toml (see receive_debug.py)")
+    print("Log is too long to dump here — fix local upload and retry.")
     return false
 end
 

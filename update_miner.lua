@@ -104,9 +104,22 @@ for _, entry in ipairs(FILES) do
     print("")
 end
 
+-- Default local debug upload target (receive_debug.py on your PC).
+if not fs.exists("debug_server.txt") then
+    local h = fs.open("debug_server.txt", "w")
+    if h then
+        h.write("http://127.0.0.1:8787/debug")
+        h.close()
+        print("Wrote debug_server.txt -> http://127.0.0.1:8787/debug")
+    end
+end
+
 if ok_count == #FILES then
     print("All files ready. Example:")
     print("  strip_miner.lua 1 64")
+    print("Debug upload: run `python receive_debug.py` on PC, then:")
+    print("  lua")
+    print('  require("turtle_lib").upload_debug()')
 else
     print(ok_count .. "/" .. #FILES .. " files updated.")
 end
