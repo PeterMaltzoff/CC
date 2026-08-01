@@ -27,7 +27,7 @@ local MAX_DIG_ATTEMPTS = 10
 
 -- Set true to append every movement/dig/chest action to debug.txt on the turtle.
 -- Or pass { debug = true } to turtle_lib.new().
-local DEBUG = true
+local DEBUG = false
 local DEBUG_FILE = "debug.txt"
 
 local function debug_timestamp()
