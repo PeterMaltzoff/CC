@@ -25,7 +25,7 @@
 --   main_step     main-tunnel blocks dug per iteration before branching
 --                 (optional, default 2 - or the saved value if omitted)
 
-local VERSION = "1.0.14"
+local VERSION = "1.0.15"
 
 package.loaded["turtle_lib"] = nil
 local turtle_lib = require("turtle_lib")
@@ -119,6 +119,7 @@ local BUILD_NAMES = {
     "minecraft:cobblestone",
     "minecraft:cobbled_deepslate", -- what mined deepslate actually drops (not "minecraft:deepslate")
 }
+local BUILD_KEEP = 64 -- keep up to one stack of plugging material; dump the rest
 
 local TORCH_BLOCK_NAMES = {
     ["minecraft:torch"] = true,
@@ -196,24 +197,14 @@ local function clear_fluid_above(bot)
     end
 end
 
--- Prep while already standing in the torch cell (mid height): dig the block
--- ahead so placeUp won't hang on it, and ensure the preferred side wall exists.
--- Caller must already be at mid height facing along the branch.
-local function prepare_torch_mount(bot, prefer_side)
-    local home = bot.facing
-    local prefer_facing = prefer_side == "left" and ((home + 3) % 4) or ((home + 1) % 4)
-
+-- While at mid height facing along the branch: dig the block ahead so placeUp
+-- won't hang the torch on it. Side walls were already sealed this step — no
+-- need to look left/right again.
+local function clear_torch_forward_support()
     if turtle.detect() then
         turtle.dig()
         bot.log("torch cleared forward support")
     end
-
-    bot.turn_to(prefer_facing)
-    if not turtle.detect() then
-        local mounted = place_build(turtle.place, bot)
-        bot.log("torch mount wall placed=" .. tostring(mounted))
-    end
-    bot.turn_to(home)
 end
 
 -- placeUp() from the floor into the prepared cell above.
@@ -397,9 +388,9 @@ local function mine_branch_step(bot, step, do_seal, place_torch, prefer_side)
         bot.turn_to(home)
     end
 
-    -- Torch prep while still at mid height (no second trip up).
+    -- Dig ahead while still at mid height so placeUp attaches to a side wall.
     if place_torch then
-        prepare_torch_mount(bot, prefer_side)
+        clear_torch_forward_support()
     end
 
     bot.move_down()
@@ -445,16 +436,53 @@ end
 
 -- ---------- home chest ----------
 
-local function resupply(bot)
-    bot.recover_to_home(0)
+local function count_build_items(bot)
+    local total = 0
+    for _, name in ipairs(BUILD_NAMES) do
+        total = total + bot.count_item(name)
+    end
+    return total
+end
 
-    bot.turn_left()
-    -- Keep fuel, torches, and build blocks used for sealing holes.
+local function is_build_item(name)
+    for _, build_name in ipairs(BUILD_NAMES) do
+        if name == build_name then return true end
+    end
+    return false
+end
+
+-- Dump junk to the chest we're facing. Keep fuel, torches, and up to
+-- BUILD_KEEP plugging blocks (cobble / cobbled deepslate).
+local function dump_inventory(bot)
     local keep = { [FUEL_NAME] = true, [TORCH_NAME] = true }
     for _, name in ipairs(BUILD_NAMES) do
         keep[name] = true
     end
     bot.push_items("front", keep)
+
+    -- Trim plugging material down to one stack so mining drops don't fill us.
+    local excess = count_build_items(bot) - BUILD_KEEP
+    if excess <= 0 then return end
+
+    for slot = 1, 16 do
+        if excess <= 0 then break end
+        local detail = turtle.getItemDetail(slot)
+        if detail and is_build_item(detail.name) then
+            local drop_n = math.min(detail.count, excess)
+            turtle.select(slot)
+            turtle.drop(drop_n)
+            excess = excess - drop_n
+            bot.log("dump excess build slot=" .. slot .. " n=" .. drop_n)
+        end
+    end
+    turtle.select(1)
+end
+
+local function resupply(bot)
+    bot.recover_to_home(0)
+
+    bot.turn_left()
+    dump_inventory(bot)
 
     local torch_need = TORCH_TARGET - bot.count_item(TORCH_NAME)
     if torch_need > 0 then
